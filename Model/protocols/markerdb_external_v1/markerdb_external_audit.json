@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "protocol": "markerdb_external_edge_holdout",
+  "training_graph_excludes_all_evaluable_markerdb_pairs": true,
+  "selection_uses_external_edges": false,
+  "targets": [
+    "gene",
+    "metabolite",
+    "protein",
+    "rna"
+  ],
+  "source_files": {
+    "merged_edges": {
+      "path": "Data/merged_edge.csv",
+      "sha256": "3bbdac1467fedd818335c4e2ea5995da7862721b2133d671d6f0be60d0fd6522"
+    },
+    "markerdb_edges": {
+      "path": "Model/marker_edge.csv",
+      "sha256": "2168eb2efc600f07a65ed4e2f4ccc19e160bbb10f1154f0d29244181a8ba116b"
+    }
+  },
+  "counts": {
+    "merged_edges_before": 4139816,
+    "merged_edges_after": 4137591,
+    "removed_graph_edges": 2225,
+    "markerdb_unique_pairs": 2225,
+    "evaluable_external_pairs": 2225,
+    "unmatched_markerdb_pairs": 0,
+    "skipped_markerdb_rows": 0,
+    "evaluable_pairs_by_target": {
+      "gene": 1440,
+      "metabolite": 654,
+      "protein": 89,
+      "rna": 42
+    },
+    "clean_graph_pair_overlap": 0
+  },
+  "outputs": {
+    "training_graph": {
+      "path": "Model/protocols/markerdb_external_v1/merged_edge_without_markerdb.csv",
+      "sha256": "2d59fc310288873f24cad748791cd22b96fc348ce69cdb957ebda73af53fc1d2"
+    },
+    "external_edges": {
+      "path": "Model/protocols/markerdb_external_v1/markerdb_external_edges.csv",
+      "sha256": "f5040b93b48a8ca30d8f084af2b387105cf8d2c9644b935015303a6a331461f4"
+    },
+    "removed_edges": {
+      "path": "Model/protocols/markerdb_external_v1/removed_markerdb_graph_edges.csv",
+      "sha256": "e492ea892aa048a6d1a158f5db1a2b83a0178a6d561d622ebcaf1954434dc41b"
+    }
+  },
+  "skipped_rows_preview": []
+}

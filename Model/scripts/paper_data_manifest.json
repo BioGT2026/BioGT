@@ -1,0 +1,18 @@
+{
+  "created_at": "2026-07-29T22:41:09.2464472+08:00",
+  "hash_algorithm": "sha256",
+  "files": {
+    "Data/merged_node.csv": {
+      "bytes": 2410241665,
+      "sha256": "d19d5c900b663861017443d96f6444c47b3b952d8014e114150460b3c9ffc7b3"
+    },
+    "Data/merged_edge.csv": {
+      "bytes": 380947831,
+      "sha256": "3bbdac1467fedd818335c4e2ea5995da7862721b2133d671d6f0be60d0fd6522"
+    },
+    "Data/marker_edge.csv": {
+      "bytes": 208982,
+      "sha256": "2168eb2efc600f07a65ed4e2f4ccc19e160bbb10f1154f0d29244181a8ba116b"
+    }
+  }
+}

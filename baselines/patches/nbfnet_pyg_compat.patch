@@ -1,0 +1,113 @@
+diff --git a/nbfnet/layers.py b/nbfnet/layers.py
+index 982c9a7..23ef764 100644
+--- a/nbfnet/layers.py
++++ b/nbfnet/layers.py
+@@ -1,7 +1,9 @@
++import os
++
+ import torch
+ from torch import nn
+ from torch.nn import functional as F
+-from torch_scatter import scatter
++from .scatter_compat import scatter
+ 
+ from torch_geometric.nn.conv import MessagePassing
+ from torch_geometric.utils import degree
+@@ -67,7 +69,11 @@ class GeneralizedRelationalConv(MessagePassing):
+         return output
+ 
+     def propagate(self, edge_index, size=None, **kwargs):
+-        if kwargs["edge_weight"].requires_grad or self.message_func == "rotate":
++        if (
++            kwargs["edge_weight"].requires_grad
++            or self.message_func == "rotate"
++            or os.environ.get("NBFNET_DISABLE_FUSED") == "1"
++        ):
+             # the rspmm cuda kernel only works for TransE and DistMult message functions
+             # otherwise we invoke separate message & aggregate functions
+             return super(GeneralizedRelationalConv, self).propagate(edge_index, size, **kwargs)
+diff --git a/nbfnet/models.py b/nbfnet/models.py
+index 2a8e991..9361f9c 100644
+--- a/nbfnet/models.py
++++ b/nbfnet/models.py
+@@ -4,7 +4,7 @@ from collections.abc import Sequence
+ import torch
+ from torch import nn, autograd
+ 
+-from torch_scatter import scatter_add
++from .scatter_compat import scatter_add
+ from . import tasks, layers
+ 
+ 
+@@ -327,4 +327,4 @@ def scatter_topk(input, size, k, largest=True):
+         index = index.view(-1, k, *input.shape[1:])
+         index = index - (size.cumsum(0) - size).view([-1] + [1] * (index.ndim - 1))
+ 
+-    return value, index
+\ No newline at end of file
++    return value, index
+diff --git a/nbfnet/scatter_compat.py b/nbfnet/scatter_compat.py
+new file mode 100644
+index 0000000..2955e97
+--- /dev/null
++++ b/nbfnet/scatter_compat.py
+@@ -0,0 +1,59 @@
++"""Small torch-scatter compatibility layer implemented with native PyTorch."""
++
++from __future__ import annotations
++
++import torch
++
++
++def _expanded_index(index, src, dim):
++    shape = [1] * src.ndim
++    shape[dim] = index.numel()
++    return index.reshape(shape).expand_as(src)
++
++
++def scatter(src, index, dim=0, out=None, dim_size=None, reduce="sum"):
++    if dim < 0:
++        dim += src.ndim
++    if dim_size is None:
++        dim_size = int(index.max().item()) + 1 if index.numel() else 0
++    if out is None:
++        shape = list(src.shape)
++        shape[dim] = dim_size
++        out = src.new_zeros(shape)
++    expanded_index = _expanded_index(index, src, dim)
++
++    if reduce in {"sum", "add"}:
++        return out.scatter_add_(dim, expanded_index, src)
++    if reduce == "mean":
++        out.scatter_add_(dim, expanded_index, src)
++        count_shape = [1] * src.ndim
++        count_shape[dim] = dim_size
++        counts = src.new_zeros(count_shape)
++        count_values = src.new_ones([1] * (src.ndim - 1) + [index.numel()])
++        count_values = count_values.movedim(-1, dim)
++        count_index = index.reshape(
++            [index.numel() if axis == dim else 1 for axis in range(src.ndim)]
++        )
++        counts.scatter_add_(dim, count_index, count_values)
++        return out / counts.clamp_min(1)
++    if reduce in {"max", "min"}:
++        reduce_name = "amax" if reduce == "max" else "amin"
++        return out.scatter_reduce_(
++            dim,
++            expanded_index,
++            src,
++            reduce=reduce_name,
++            include_self=False,
++        )
++    raise ValueError(f"Unsupported scatter reduction: {reduce}")
++
++
++def scatter_add(src, index, dim=0, out=None, dim_size=None):
++    return scatter(
++        src,
++        index,
++        dim=dim,
++        out=out,
++        dim_size=dim_size,
++        reduce="sum",
++    )

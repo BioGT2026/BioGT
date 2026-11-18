@@ -1,0 +1,8 @@
+baseline	source_url	local_path	license	notes
+TransE/DistMult/ComplEx/RotatE	https://github.com/DeepGraphLearning/KnowledgeGraphEmbedding	baselines/external/KnowledgeGraphEmbedding	MIT	Upstream PyTorch KGE implementation.
+CompGCN	https://github.com/malllabiisc/CompGCN	baselines/external/CompGCN	Apache-2.0	Patched locally to preserve entity and relation case.
+R-GCN reference	https://github.com/tkipf/relational-gcn	baselines/external/relational-gcn	MIT	Original reference code; retained for provenance, not used as the primary link-prediction runner.
+PPR/RWR	local wrapper	baselines/scripts/run_ppr_baseline.py	Project license	Lightweight sparse personalized PageRank baseline.
+R-GCN runner	local wrapper	baselines/scripts/run_rgcn_baseline.py	Project license	PyTorch relational GCN link-prediction runner adapted for BioGT triples.
+HGT	https://github.com/pyg-team/pytorch_geometric	torch_geometric.nn.HGTConv	MIT	Official PyG HGT operator used by the joint four-target runner.
+NBFNet	https://github.com/KiddoZhu/NBFNet-PyG	baselines/external/NBFNet-PyG	MIT	Official author-maintained PyG implementation pinned at 0c2d262e1d0175c174f62367d08ce4060b0d7b89.

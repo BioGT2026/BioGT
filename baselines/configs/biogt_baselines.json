@@ -1,0 +1,72 @@
+{
+  "dataset": "biogt_edge_masked",
+  "metrics": ["MRR", "MR", "Hits@1", "Hits@3", "Hits@10", "Hits@50", "Hits@100", "Recall@10", "Recall@50", "Recall@100", "NDCG@10", "NDCG@50", "NDCG@100"],
+  "kge_models": {
+    "TransE": {
+      "hidden_dim": 128,
+      "gamma": 12.0,
+      "learning_rate": 0.0001,
+      "negative_sample_size": 5,
+      "double_entity_embedding": false,
+      "double_relation_embedding": false
+    },
+    "DistMult": {
+      "hidden_dim": 128,
+      "gamma": 200.0,
+      "learning_rate": 0.001,
+      "negative_sample_size": 5,
+      "regularization": 0.00001,
+      "double_entity_embedding": false,
+      "double_relation_embedding": false
+    },
+    "ComplEx": {
+      "hidden_dim": 128,
+      "gamma": 200.0,
+      "learning_rate": 0.001,
+      "negative_sample_size": 5,
+      "regularization": 0.00001,
+      "double_entity_embedding": true,
+      "double_relation_embedding": true
+    },
+    "RotatE": {
+      "hidden_dim": 128,
+      "gamma": 12.0,
+      "learning_rate": 0.0001,
+      "negative_sample_size": 5,
+      "negative_adversarial_sampling": true,
+      "double_entity_embedding": true,
+      "double_relation_embedding": false
+    }
+  },
+  "compgcn": {
+    "score_func": "distmult",
+    "opn": "corr",
+    "gcn_layer": 2,
+    "gcn_dim": 128,
+    "init_dim": 128,
+    "max_epochs": 100
+  },
+  "ppr": {
+    "alpha": 0.85,
+    "max_iter": 50,
+    "tol": 1e-8
+  },
+  "rgcn": {
+    "embedding_dim": 128,
+    "hidden_dim": 128,
+    "num_layers": 2,
+    "negative_ratio": 1,
+    "learning_rate": 0.001
+  },
+  "hgt": {
+    "hidden_dim": 128,
+    "num_layers": 2,
+    "negative_ratio": 1,
+    "learning_rate": 0.001
+  },
+  "nbfnet": {
+    "num_layers": 3,
+    "negative_ratio": 1,
+    "learning_rate": 0.01
+  }
+}

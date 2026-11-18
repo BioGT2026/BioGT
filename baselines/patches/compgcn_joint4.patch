@@ -1,0 +1,414 @@
+diff --git a/data_loader.py b/data_loader.py
+index 500ef3b..de66fc5 100755
+--- a/data_loader.py
++++ b/data_loader.py
+@@ -0,0 +1,3 @@
++from collections import defaultdict
++import math
++
+@@ -2 +5,34 @@ from helper import *
+-from torch.utils.data import Dataset
++from torch.utils.data import Dataset, Sampler
++
++
++class RelationBalancedBatchSampler(Sampler):
++	"""Relation-homogeneous batches with BioGT-equivalent fixed epoch length."""
++	def __init__(self, triples, batch_size, seed=42):
++		self.batch_size = int(batch_size)
++		self.seed = int(seed)
++		self.epoch = 0
++		self.indices_by_relation = defaultdict(list)
++		for index, item in enumerate(triples):
++			self.indices_by_relation[int(item['triple'][1])].append(index)
++		self.relations = sorted(self.indices_by_relation)
++		self.num_batches = max(
++			len(self.relations),
++			math.ceil(len(triples) / self.batch_size),
++		)
++
++	def __iter__(self):
++		generator = torch.Generator().manual_seed(self.seed + self.epoch * 100003)
++		offset = self.epoch % len(self.relations)
++		self.epoch += 1
++		for step in range(self.num_batches):
++			relation = self.relations[(step + offset) % len(self.relations)]
++			indices = self.indices_by_relation[relation]
++			sampled = torch.randint(
++				len(indices),
++				(self.batch_size,),
++				generator=generator,
++			).tolist()
++			yield [indices[index] for index in sampled]
++
++	def __len__(self):
++		return self.num_batches
+diff --git a/helper.py b/helper.py
+index f7c9f61..58caecb 100755
+--- a/helper.py
++++ b/helper.py
+@@ -70,4 +70,10 @@ def get_combined_results(left_results, right_results):
+-	for k in range(10):
+-		results['left_hits@{}'.format(k+1)]	= round(left_results ['hits@{}'.format(k+1)]/count, 5)
+-		results['right_hits@{}'.format(k+1)]	= round(right_results['hits@{}'.format(k+1)]/count, 5)
+-		results['hits@{}'.format(k+1)]		= round((left_results['hits@{}'.format(k+1)] + right_results['hits@{}'.format(k+1)])/(2*count), 5)
++	for k in list(range(1, 11)) + [50, 100]:
++		results['left_hits@{}'.format(k)]	= round(left_results ['hits@{}'.format(k)]/count, 5)
++		results['right_hits@{}'.format(k)]	= round(right_results['hits@{}'.format(k)]/count, 5)
++		results['hits@{}'.format(k)]		= round((left_results['hits@{}'.format(k)] + right_results['hits@{}'.format(k)])/(2*count), 5)
++		results['left_recall@{}'.format(k)]	= round(left_results ['recall@{}'.format(k)]/count, 5)
++		results['right_recall@{}'.format(k)]	= round(right_results['recall@{}'.format(k)]/count, 5)
++		results['recall@{}'.format(k)]		= round((left_results['recall@{}'.format(k)] + right_results['recall@{}'.format(k)])/(2*count), 5)
++		results['left_ndcg@{}'.format(k)]	= round(left_results ['ndcg@{}'.format(k)]/count, 5)
++		results['right_ndcg@{}'.format(k)]	= round(right_results['ndcg@{}'.format(k)]/count, 5)
++		results['ndcg@{}'.format(k)]		= round((left_results['ndcg@{}'.format(k)] + right_results['ndcg@{}'.format(k)])/(2*count), 5)
+@@ -91 +97 @@ def cconv(a, b):
+-	return torch.irfft(com_mult(torch.rfft(a, 1), torch.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
++	return torch.fft.irfft(torch.fft.rfft(a, dim=-1) * torch.fft.rfft(b, dim=-1), n=a.shape[-1], dim=-1)
+@@ -94 +100 @@ def ccorr(a, b):
+-	return torch.irfft(com_mult(conj(torch.rfft(a, 1)), torch.rfft(b, 1)), 1, signal_sizes=(a.shape[-1],))
+\ No newline at end of file
++	return torch.fft.irfft(torch.conj(torch.fft.rfft(a, dim=-1)) * torch.fft.rfft(b, dim=-1), n=a.shape[-1], dim=-1)
+diff --git a/model/message_passing.py b/model/message_passing.py
+index 97771ee..af395f0 100755
+--- a/model/message_passing.py
++++ b/model/message_passing.py
+@@ -48,2 +48,2 @@ class MessagePassing(torch.nn.Module):
+-		self.message_args = inspect.getargspec(self.message)[0][1:]	# In the defined message function: get the list of arguments as list of string| For eg. in rgcn this will be ['x_j', 'edge_type', 'edge_norm'] (arguments of message function)
+-		self.update_args  = inspect.getargspec(self.update)[0][2:]	# Same for update function starting from 3rd argument | first=self, second=out
++		self.message_args = inspect.getfullargspec(self.message)[0][1:]	# In the defined message function: get the list of arguments as list of string| For eg. in rgcn this will be ['x_j', 'edge_type', 'edge_norm'] (arguments of message function)
++		self.update_args  = inspect.getfullargspec(self.update)[0][2:]	# Same for update function starting from 3rd argument | first=self, second=out
+diff --git a/run.py b/run.py
+index ce5d3fb..7782991 100755
+--- a/run.py
++++ b/run.py
+@@ -32,11 +32,17 @@ class Runner(object):
+-		ent_set, rel_set = OrderedSet(), OrderedSet()
+-		for split in ['train', 'test', 'valid']:
+-			for line in open('./data/{}/{}.txt'.format(self.p.dataset, split)):
+-				sub, rel, obj = map(str.lower, line.strip().split('\t'))
+-				ent_set.add(sub)
+-				rel_set.add(rel)
+-				ent_set.add(obj)
+-
+-		self.ent2id = {ent: idx for idx, ent in enumerate(ent_set)}
+-		self.rel2id = {rel: idx for idx, rel in enumerate(rel_set)}
+-		self.rel2id.update({rel+'_reverse': idx+len(self.rel2id) for idx, rel in enumerate(rel_set)})
++		data_root = './data/{}'.format(self.p.dataset)
++		def read_mapping(filename):
++			mapping = {}
++			with open(os.path.join(data_root, filename), encoding='utf-8') as handle:
++				for line in handle:
++					index, name = line.rstrip('\n').split('\t', 1)
++					mapping[name] = int(index)
++			return mapping
++
++		# The transductive vocabulary is public before fitting; test edge labels are not.
++		self.ent2id = read_mapping('entities.dict')
++		forward_rel2id = read_mapping('relations.dict')
++		self.rel2id = dict(forward_rel2id)
++		self.rel2id.update({
++			rel + '_reverse': idx + len(forward_rel2id)
++			for rel, idx in forward_rel2id.items()
++		})
+@@ -49,0 +56,21 @@ class Runner(object):
++		candidate_path = self.p.candidate_file or './data/{}/candidate_entities.txt'.format(self.p.dataset)
++		with open(candidate_path, encoding='utf-8') as candidate_handle:
++			candidate_names = [line.strip() for line in candidate_handle if line.strip()]
++		self.candidate_ids = torch.LongTensor(
++			[self.ent2id[name] for name in candidate_names]
++		).to(self.device)
++		self.candidate_ids_by_relation = {}
++		self.relation_to_target = {}
++		if self.p.candidate_manifest:
++			with open(self.p.candidate_manifest, encoding='utf-8') as manifest_handle:
++				manifest = json.load(manifest_handle)
++			manifest_root = os.path.dirname(self.p.candidate_manifest)
++			for target, spec in manifest['targets'].items():
++				relation_id = self.rel2id[spec['relation']]
++				candidate_file = os.path.join(manifest_root, spec['candidate_file'])
++				with open(candidate_file, encoding='utf-8') as candidate_handle:
++					target_names = [line.strip() for line in candidate_handle if line.strip()]
++				self.candidate_ids_by_relation[relation_id] = torch.LongTensor(
++					[self.ent2id[name] for name in target_names]
++				).to(self.device)
++				self.relation_to_target[relation_id] = target
+@@ -54 +81 @@ class Runner(object):
+-		for split in ['train', 'test', 'valid']:
++		for split in ['train', 'valid']:
+@@ -56 +83 @@ class Runner(object):
+-				sub, rel, obj = map(str.lower, line.strip().split('\t'))
++				sub, rel, obj = line.strip().split('\t')
+@@ -67,4 +94,3 @@ class Runner(object):
+-		for split in ['test', 'valid']:
+-			for sub, rel, obj in self.data[split]:
+-				sr2o[(sub, rel)].add(obj)
+-				sr2o[(obj, rel+self.p.num_rel)].add(sub)
++		for sub, rel, obj in self.data['valid']:
++			sr2o[(sub, rel)].add(obj)
++			sr2o[(obj, rel+self.p.num_rel)].add(sub)
+@@ -72 +98 @@ class Runner(object):
+-		self.sr2o_all = {k: list(v) for k, v in sr2o.items()}
++		self.sr2o_train_valid = {k: list(v) for k, v in sr2o.items()}
+@@ -76,7 +102,13 @@ class Runner(object):
+-			self.triples['train'].append({'triple':(sub, rel, -1), 'label': self.sr2o[(sub, rel)], 'sub_samp': 1})
+-
+-		for split in ['test', 'valid']:
+-			for sub, rel, obj in self.data[split]:
+-				rel_inv = rel + self.p.num_rel
+-				self.triples['{}_{}'.format(split, 'tail')].append({'triple': (sub, rel, obj), 	   'label': self.sr2o_all[(sub, rel)]})
+-				self.triples['{}_{}'.format(split, 'head')].append({'triple': (obj, rel_inv, sub), 'label': self.sr2o_all[(obj, rel_inv)]})
++			if rel < self.p.num_rel:
++				self.triples['train'].append({'triple':(sub, rel, -1), 'label': self.sr2o[(sub, rel)], 'sub_samp': 1})
++
++		for sub, rel, obj in self.data['valid']:
++			rel_inv = rel + self.p.num_rel
++			self.triples['valid_tail'].append({
++				'triple': (sub, rel, obj),
++				'label': self.sr2o_train_valid[(sub, rel)],
++			})
++			self.triples['valid_head'].append({
++				'triple': (obj, rel_inv, sub),
++				'label': self.sr2o_train_valid[(obj, rel_inv)],
++			})
+@@ -85 +116,0 @@ class Runner(object):
+-
+@@ -96 +127,8 @@ class Runner(object):
+-			'train':    	get_data_loader(TrainDataset, 'train', 	    self.p.batch_size),
++			'train': DataLoader(
++				TrainDataset(self.triples['train'], self.p),
++				batch_sampler=RelationBalancedBatchSampler(
++					self.triples['train'], self.p.batch_size, seed=42
++				),
++				num_workers=max(0, self.p.num_workers),
++				collate_fn=TrainDataset.collate_fn,
++			),
+@@ -99,2 +136,0 @@ class Runner(object):
+-			'test_head':   	get_data_loader(TestDataset,  'test_head',  self.p.batch_size),
+-			'test_tail':   	get_data_loader(TestDataset,  'test_tail',  self.p.batch_size),
+@@ -101,0 +138 @@ class Runner(object):
++		self.test_prepared = False
+@@ -104,0 +142,40 @@ class Runner(object):
++	def prepare_test_data(self):
++		if self.test_prepared:
++			return
++
++		test_rows = []
++		for line in open('./data/{}/test.txt'.format(self.p.dataset)):
++			sub, rel, obj = line.strip().split('\t')
++			test_rows.append((
++				self.ent2id[sub],
++				self.rel2id[rel],
++				self.ent2id[obj],
++			))
++		self.data['test'] = test_rows
++
++		for sub, rel, obj in test_rows:
++			rel_inv = rel + self.p.num_rel
++			tail_labels = set(self.sr2o_train_valid.get((sub, rel), []))
++			head_labels = set(self.sr2o_train_valid.get((obj, rel_inv), []))
++			tail_labels.add(obj)
++			head_labels.add(sub)
++			self.triples.setdefault('test_tail', []).append({
++				'triple': (sub, rel, obj),
++				'label': sorted(tail_labels),
++			})
++			self.triples.setdefault('test_head', []).append({
++				'triple': (obj, rel_inv, sub),
++				'label': sorted(head_labels),
++			})
++
++		for mode in ['head', 'tail']:
++			split = 'test_{}'.format(mode)
++			self.data_iter[split] = DataLoader(
++				TestDataset(self.triples[split], self.p),
++				batch_size=self.p.batch_size,
++				shuffle=False,
++				num_workers=max(0, self.p.num_workers),
++				collate_fn=TestDataset.collate_fn,
++			)
++		self.test_prepared = True
++
+@@ -280,4 +357,7 @@ class Runner(object):
+-		left_results  = self.predict(split=split, mode='tail_batch')
+-		right_results = self.predict(split=split, mode='head_batch')
+-		results       = get_combined_results(left_results, right_results)
+-		self.logger.info('[Epoch {} {}]: MRR: Tail : {:.5}, Head : {:.5}, Avg : {:.5}'.format(epoch, split, results['left_mrr'], results['right_mrr'], results['mrr']))
++		left_results, target_results = self.predict(split=split, mode='tail_batch')
++		results = get_combined_results(left_results, left_results)
++		self.last_metrics_by_target = {
++			target: get_combined_results(raw_metrics, raw_metrics)
++			for target, raw_metrics in target_results.items()
++		}
++		self.logger.info('[Epoch {} {}]: MRR: Tail : {:.5}, Task : {:.5}'.format(epoch, split, results['left_mrr'], results['mrr']))
+@@ -285,0 +366,47 @@ class Runner(object):
++	def write_test_metrics(self, results):
++		metrics_dir = os.path.abspath(os.path.join(os.getcwd(), '..', '..', 'runs', 'compgcn', self.p.dataset))
++		os.makedirs(metrics_dir, exist_ok=True)
++		metrics_path = os.path.join(metrics_dir, 'metrics.json')
++		metrics = {
++			key: float(value)
++			for key, value in results.items()
++			if isinstance(value, (int, float, np.integer, np.floating))
++		}
++		payload = {
++			'baseline': 'CompGCN',
++			'dataset': self.p.dataset,
++			'best_epoch': int(self.best_epoch),
++			'validation_mrr': float(self.best_val_mrr),
++			'split_protocol': {
++				'fit': 'train_only',
++				'checkpoint_selection': 'valid_only',
++				'test_queries': 'loaded_after_checkpoint_freeze',
++				'test_filter': 'train_plus_valid_without_other_test_labels',
++			},
++			'metrics': metrics,
++			'metrics_macro': {
++				key: float(np.mean([
++					target_metrics[key]
++					for target_metrics in self.last_metrics_by_target.values()
++					if key in target_metrics
++				]))
++				for key in sorted({
++					metric
++					for target_metrics in self.last_metrics_by_target.values()
++					for metric in target_metrics
++					if metric not in {'count'}
++				})
++			},
++			'metrics_by_target': {
++				target: {
++					key: float(value)
++					for key, value in target_metrics.items()
++					if isinstance(value, (int, float, np.integer, np.floating))
++				}
++				for target, target_metrics in self.last_metrics_by_target.items()
++			},
++		}
++		with open(metrics_path, 'w', encoding='utf-8') as fout:
++			json.dump(payload, fout, indent=2)
++		self.logger.info('Wrote test metrics to {}'.format(metrics_path))
++
+@@ -306,0 +434 @@ class Runner(object):
++			results_by_target = ddict(dict)
+@@ -310,0 +439,10 @@ class Runner(object):
++				if self.p.max_eval_triples > 0:
++					remaining = self.p.max_eval_triples - int(results.get('count', 0))
++					if remaining <= 0:
++						break
++					sub, rel, obj, label = (
++						sub[:remaining],
++						rel[:remaining],
++						obj[:remaining],
++						label[:remaining],
++					)
+@@ -316 +454,15 @@ class Runner(object):
+-				ranks			= 1 + torch.argsort(torch.argsort(pred, dim=1, descending=True), dim=1, descending=False)[b_range, obj]
++				candidate_mask = torch.zeros_like(pred, dtype=torch.bool)
++				for relation_id in torch.unique(rel).tolist():
++					row_ids = torch.nonzero(rel == relation_id, as_tuple=False).flatten()
++					relation_candidates = self.candidate_ids_by_relation.get(
++						relation_id, self.candidate_ids
++					)
++					candidate_mask[row_ids.unsqueeze(1), relation_candidates.unsqueeze(0)] = True
++				pred = pred.masked_fill(~candidate_mask, -10000000)
++				target_pred = pred[b_range, obj]
++				greater = torch.sum(pred > target_pred.unsqueeze(1), dim=1).float()
++				equal = torch.sum(
++					torch.isclose(pred, target_pred.unsqueeze(1)) & candidate_mask,
++					dim=1,
++				).float()
++				ranks = 1.0 + greater + 0.5 * torch.clamp(equal - 1.0, min=0.0)
+@@ -319,5 +471,7 @@ class Runner(object):
+-				results['count']	= torch.numel(ranks) 		+ results.get('count', 0.0)
+-				results['mr']		= torch.sum(ranks).item() 	+ results.get('mr',    0.0)
+-				results['mrr']		= torch.sum(1.0/ranks).item()   + results.get('mrr',   0.0)
+-				for k in range(10):
+-					results['hits@{}'.format(k+1)] = torch.numel(ranks[ranks <= (k+1)]) + results.get('hits@{}'.format(k+1), 0.0)
++				self.update_rank_results(results, ranks)
++				for relation_id in torch.unique(rel).tolist():
++					target = self.relation_to_target.get(relation_id)
++					if target is None:
++						continue
++					target_ranks = ranks[rel == relation_id]
++					self.update_rank_results(results_by_target[target], target_ranks)
+@@ -328 +482,13 @@ class Runner(object):
+-		return results
++		return results, dict(results_by_target)
++
++	def update_rank_results(self, results, ranks):
++		results['count'] = torch.numel(ranks) + results.get('count', 0.0)
++		results['mr'] = torch.sum(ranks).item() + results.get('mr', 0.0)
++		results['mrr'] = torch.sum(1.0/ranks).item() + results.get('mrr', 0.0)
++		for k in list(range(1, 11)) + [50, 100]:
++			hits = ranks <= k
++			results['hits@{}'.format(k)] = torch.numel(ranks[hits]) + results.get('hits@{}'.format(k), 0.0)
++			# Each query has one relevant answer, so Recall@K equals Hits@K.
++			results['recall@{}'.format(k)] = torch.numel(ranks[hits]) + results.get('recall@{}'.format(k), 0.0)
++			ndcg = torch.where(hits, 1.0 / torch.log2(ranks + 1.0), torch.zeros_like(ranks))
++			results['ndcg@{}'.format(k)] = torch.sum(ndcg).item() + results.get('ndcg@{}'.format(k), 0.0)
+@@ -347,0 +514,2 @@ class Runner(object):
++			if self.p.max_steps_per_epoch > 0 and step >= self.p.max_steps_per_epoch:
++				break
+@@ -351,2 +519,11 @@ class Runner(object):
+-			pred	= self.model.forward(sub, rel)
+-			loss	= self.model.loss(pred, label)
++			pred = self.model.forward(sub, rel)
++			relation_id = int(rel[0].item())
++			candidate_ids = self.candidate_ids_by_relation.get(
++				relation_id, self.candidate_ids
++			)
++			candidate_pred = pred[:, candidate_ids]
++			candidate_label = label[:, candidate_ids]
++			loss = self.model.loss(
++				candidate_pred,
++				candidate_label,
++			)
+@@ -406,0 +584 @@ class Runner(object):
++		self.prepare_test_data()
+@@ -407,0 +586 @@ class Runner(object):
++		self.write_test_metrics(test_results)
+@@ -413,0 +593,2 @@ if __name__ == '__main__':
++	parser.add_argument('-candidate_file', dest='candidate_file', default=None, help='Candidate tail entity file')
++	parser.add_argument('-candidate_manifest', dest='candidate_manifest', default=None, help='Per-relation candidate manifest')
+@@ -421,0 +603,2 @@ if __name__ == '__main__':
++	parser.add_argument('-max_steps_per_epoch', type=int, default=0, help='Optional training smoke cap')
++	parser.add_argument('-max_eval_triples', type=int, default=0, help='Optional evaluation smoke cap')
+diff --git a/torch_scatter.py b/torch_scatter.py
+new file mode 100644
+index 0000000..13e17b7
+--- /dev/null
++++ b/torch_scatter.py
+@@ -0,0 +1,33 @@
++import torch
++
++
++def scatter_add(src, index, dim=0, out=None, dim_size=None):
++	if out is None:
++		size = list(src.size())
++		if dim_size is None:
++			dim_size = int(index.max().item()) + 1 if index.numel() > 0 else 0
++		size[dim] = dim_size
++		out = src.new_zeros(size)
++	return out.index_add_(dim, index, src)
++
++
++def scatter(src, index, dim=0, out=None, dim_size=None, reduce='sum'):
++	if reduce in ('sum', 'add'):
++		return scatter_add(src, index, dim=dim, out=out, dim_size=dim_size)
++	if dim != 0:
++		raise NotImplementedError("Local torch_scatter shim only supports dim=0 for mean/max.")
++	if dim_size is None:
++		dim_size = int(index.max().item()) + 1 if index.numel() > 0 else 0
++	if reduce == 'mean':
++		out = scatter_add(src, index, dim=dim, out=out, dim_size=dim_size)
++		count = src.new_zeros((dim_size,))
++		count.index_add_(0, index, torch.ones_like(index, dtype=src.dtype))
++		return out / count.clamp_min(1).view(-1, *([1] * (src.dim() - 1)))
++	if reduce == 'max':
++		size = list(src.size())
++		size[dim] = dim_size
++		out = src.new_full(size, -torch.inf) if out is None else out
++		for row, idx in zip(src, index):
++			out[int(idx)] = torch.maximum(out[int(idx)], row)
++		return out
++	raise NotImplementedError(f"Unsupported scatter reduce mode: {reduce}")

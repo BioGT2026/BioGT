@@ -1,0 +1,6 @@
+numpy
+pandas
+scikit-learn
+torch
+torch-geometric>=2.4
+ordered-set

@@ -1,0 +1,76 @@
+#!/bin/bash
+#PBS -N biomarker_target_train           # 作业名称
+#PBS -q batch                           # 提交到batch队列
+#PBS -l walltime=480:00:00              # 预计运行时间240小时
+#PBS -l nodes=gpu01:ppn=8               # 8个CPU核心，1块GPU
+#PBS -l mem=100gb                       # 申请100GB内存
+#PBS -o output.log                      # 标准输出文件
+#PBS -e error.log                       # 标准错误文件
+#PBS -m ae                              # 作业结束时发送邮件
+#PBS -M tinoryj@gmail.com               # 邮箱地址
+
+set -eo pipefail
+
+# 固定项目目录（按你的指定目录执行）
+PROJECT_DIR="/home/20212008/LN/ModelExplainPredictFinal/Biomarkers/Model"
+
+echo "=== 作业开始运行 ==="
+echo "节点名: $PBS_NODEFILE"
+echo "作业ID: $PBS_JOBID"
+echo "开始时间: $(date)"
+
+# 加载必要的环境模块
+module load anaconda/3
+
+# 进入项目目录
+if [ ! -d "$PROJECT_DIR" ]; then
+	echo "错误: 指定目录不存在: $PROJECT_DIR" >&2
+	exit 1
+fi
+cd "$PROJECT_DIR"
+echo "工作目录: $PROJECT_DIR"
+
+# 检查GPU状态（可选）
+echo "=== GPU状态检查 ==="
+nvidia-smi 2>/dev/null || echo "nvidia-smi命令不可用"
+
+# 检查CPU和内存信息
+echo "=== 系统资源信息 ==="
+echo "CPU核心数: $(nproc)"
+echo "总内存: $(free -h | awk '/Mem:/{print $2}')"
+echo "可用内存: $(free -h | awk '/Mem:/{print $7}')"
+
+echo "=== 可用Conda环境 ==="
+conda info --envs
+# 激活特定环境（在非交互式PBS shell中先初始化conda）
+echo "=== 初始化Conda并激活pytorch-gpu环境 ==="
+if command -v conda >/dev/null 2>&1; then
+	eval "$(conda shell.bash hook)"
+else
+	echo "错误: conda命令不可用，请检查 module load anaconda/3 是否成功。" >&2
+	exit 1
+fi
+
+conda activate pytorch-gpu
+
+# 验证环境是否正确激活
+echo "=== 环境验证 ==="
+echo "Python路径: $(which python)"
+echo "Python版本: $(python --version)"
+
+export PYTHON_BIN="${PYTHON_BIN:-$(which python)}"
+export DATA_PATH="${DATA_PATH:-/home/20212008/LN/dataset/graphWithNodeType/merge}"
+export LOCAL_MODEL_PATH="${LOCAL_MODEL_PATH:-/home/20212008/LN/models_cache}"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+export GPU="${GPU:-0}"
+export TARGET_TYPES="${TARGET_TYPES:-metabolite,protein,rna,gene}"
+
+# 实际命令
+echo "=== 开始执行您的程序 ==="
+echo "预测目标: $TARGET_TYPES"
+
+cd "$PROJECT_DIR"
+bash ./run_target_full_local.sh
+
+echo "=== 作业执行完成 ==="
+echo "结束时间: $(date)"

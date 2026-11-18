@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "experiment": "markerdb_external_edge_holdout",
+  "status": "queued_after_original_paper_suite",
+  "changes_existing_experiments": false,
+  "start_gate": {
+    "paper_suite_status": "completed",
+    "paper_suite_completed_task_count": 242
+  },
+  "joint_targets": [
+    "protein",
+    "gene",
+    "rna",
+    "metabolite"
+  ],
+  "models": [
+    "BioGT",
+    "PPR",
+    "TransE",
+    "DistMult",
+    "ComplEx",
+    "RotatE",
+    "R-GCN",
+    "CompGCN",
+    "HGT",
+    "NBFNet"
+  ],
+  "leakage_policy": {
+    "markerdb_edges_removed_before_training": true,
+    "markerdb_edges_for_checkpoint_selection": false,
+    "same_split_exported_from_biogt_for_all_baselines": true
+  },
+  "ranking_k_values": [1, 5, 10, 20, 50, 100],
+  "classification_thresholds": ["0.5", "validation_f1_optimal"]
+}
